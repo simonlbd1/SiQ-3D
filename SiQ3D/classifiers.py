@@ -12,7 +12,7 @@ from tifffile import imread
 import matplotlib.pyplot as plt
 from tensorflow.keras.layers import Conv3D, MaxPool3D, BatchNormalization, Dropout, Flatten, Dense, \
     concatenate, LeakyReLU
-from tensorflow.keras import Input, Model, optimizers
+from tensorflow.keras import Input, Model, optimizers, regularizers
 from SiQ3D.preprocess import _make_folder, _get_files
 TITLE_STYLE = {'fontsize': 16, 'verticalalignment': 'bottom'}
 
@@ -159,19 +159,20 @@ def sequential_classifier(width=64, height=64, depth=27):
     inputs = Input((width, height, depth, 1))
     conv1 = Conv3D(filters=8, kernel_size=(3, 3, 1), padding="same", activation="relu")(inputs)
     conv1 = BatchNormalization()(conv1)
-    # conv1 = Conv3D(filters=8, kernel_size=(3, 3, 1), padding="same", activation="relu")(conv1)
-    # conv1 = BatchNormalization()(conv1)
+    #conv1 = Conv3D(filters=8, kernel_size=(3, 3, 1), padding="same", activation="relu")(conv1)
+    #conv1 = BatchNormalization()(conv1)
     pool1 = MaxPool3D(pool_size=2)(conv1)
 
-    conv2 = Conv3D(filters=16, kernel_size=3, padding="same", activation="relu")(pool1)
+    conv2 = Conv3D(filters=16, kernel_size=(3, 3, 3), padding="same", activation="relu")(pool1)
     conv2 = BatchNormalization()(conv2)
-    # conv2 = Conv3D(filters=16, kernel_size=3, padding="same", activation="relu")(conv2)
-    # conv2 = BatchNormalization()(conv2)
+    #conv2 = Conv3D(filters=16, kernel_size=3, padding="same", activation="relu")(conv2)
+    #conv2 = BatchNormalization()(conv2)
     pool2 = MaxPool3D()(conv2)
 
     drop1 = Dropout(0.2)(pool2)
     dens1 = Flatten()(drop1)
-    dens2 = Dense(units=32, activation="relu")(dens1)
+
+    dens2 = Dense(units=96, activation="relu")(dens1)
     outputs = Dense(units=1, activation="sigmoid")(dens2)
 
     model = Model(inputs=inputs, outputs=outputs)
@@ -185,7 +186,7 @@ class Classifier:
     Attributes
     ----------
     """
-    def __init__(self, model, folder_path):
+    def __init__(self, model, folder_path, learning_rate=0.001):
         self.model = model
         self.folder_path = folder_path
         self.data_set0 = None
@@ -204,9 +205,10 @@ class Classifier:
         self.acc = None
         self.loss = None
         self.val_loss = None
+        self.best_epoch = None
         self.models_path = ""
         self._make_folders()
-        self.model.compile(loss='binary_crossentropy', optimizer=optimizers.Adam(learning_rate=0.001), metrics=["acc"])
+        self.model.compile(loss='binary_crossentropy', optimizer=optimizers.Adam(learning_rate=learning_rate), metrics=["acc"])
         self.model.save_weights(os.path.join(self.models_path, 'weights_initial.h5'))
 
     def _make_folders(self):
@@ -290,11 +292,13 @@ class Classifier:
                 self.loss = [self.model.history.history["loss"][-1]]
                 print("val_acc at step 1: ", max(self.val_acc))
                 self.model.save_weights(os.path.join(self.models_path, weights_name + f"step{step}.h5"))
+                self.best_epoch = step
             else:
                 val_acc = self.model.history.history["val_acc"][-1]
                 if val_acc > max(self.val_acc):
                     print("At step: ", step, ",val_acc updated from ", max(self.val_acc), " to ", val_acc)
                     self.model.save_weights(os.path.join(self.models_path, weights_name + f"step{step}.h5"))
+                    self.best_epoch = step
 
                 self.val_acc.append(self.model.history.history["val_acc"][-1])
                 self.acc.append(self.model.history.history["acc"][-1])

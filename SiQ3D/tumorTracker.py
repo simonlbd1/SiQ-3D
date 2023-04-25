@@ -1257,6 +1257,7 @@ class Tracker(Segmentation, Draw, TrainUnet):
         coord_table = np.column_stack(
             (np.repeat(np.arange(1, t + 1), cell), np.tile(np.arange(1, cell + 1), t), coord.reshape(t * cell, pos),
              phenotypes.reshape(t * cell, 1)))
+        coord_table[:,4] /= self.z_xy_ratio
         np.savetxt(os.path.join(self.paths.tracking_information, "tracked_coordinates.csv"), coord_table, delimiter=',',
                    header="t,cell,x,y,z,phenotypes", comments="")
         print("Cell coordinates were stored in ./track_information/tracked_coordinates.csv")

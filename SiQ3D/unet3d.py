@@ -551,6 +551,7 @@ class TrainingUNet3D:
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.title("Train/validation losses of 3D U-Net", fontdict=TITLE_STYLE)
+        plt.legend()
         plt.tight_layout()
         plt.pause(0.1)
 
