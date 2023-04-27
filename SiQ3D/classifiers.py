@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.layers import Conv3D, MaxPool3D, BatchNormalization, Dropout, Flatten, Dense, \
     concatenate, LeakyReLU
 from tensorflow.keras import Input, Model, optimizers, regularizers
-from SiQ3D.preprocess import _make_folder, _get_files
+from .preprocess import _make_folder, _get_files
 TITLE_STYLE = {'fontsize': 16, 'verticalalignment': 'bottom'}
 
 

@@ -6,10 +6,10 @@ import os
 import btrack
 import matplotlib.pyplot as plt
 import numpy as np
-from SiQ3D.preprocess import _make_folder, read_image_sequence, mean_background, correct_bleaching, _normalize_image, \
+from .preprocess import _make_folder, read_image_sequence, mean_background, correct_bleaching, _normalize_image, \
     crop_subregion, save_img3ts
-from SiQ3D.unet3d import unet3_prediction
-from SiQ3D.segmentation import otsu_threshold, simple_threshold, watershed_tascan
+from .unet3d import unet3_prediction
+from .segmentation import otsu_threshold, simple_threshold, watershed_tascan
 from tensorflow.keras.models import load_model
 TITLE_STYLE = {'fontsize': 16, 'verticalalignment': 'bottom'}
 
@@ -65,10 +65,12 @@ class Paths:
     track_information: str,
         the path of the folder to store the cell coordinates
     """
-    def __init__(self, folder_path, image_name, unet_model_file, classifier_file):
+    def __init__(self, folder_path, image_name, unet_model_file, classifier_file,
+                 track_config_file):
         self.folder = folder_path
         self.unet_model_file = unet_model_file
         self.classifier_file = classifier_file
+        self.track_config_file = track_config_file
         self.image_name = image_name
         self.raw_image = None
         self.models = None
@@ -95,7 +97,7 @@ class Tracker:
     A class for tracking NK cells
     """
     def __init__(self, volume_num, xyz_size, z_xy_ratio, noise_level, folder_path, image_name, classifier_file,
-                 unet_model_file=None, min_size=200, min_distance=10, touch_ratio=0.5, touch_area=50,
+                 track_config_file, unet_model_file=None, min_size=200, min_distance=10, touch_ratio=0.5, touch_area=50,
                  threshold_method=0, search_radius=20, tascan_=0):
         self.volume = volume_num
         self.x_siz = xyz_size[0]
@@ -109,7 +111,7 @@ class Tracker:
         self.touch_area = touch_area
         self.threshold_method = threshold_method
         self.search_radius = search_radius
-        self.paths = Paths(folder_path, image_name, unet_model_file, classifier_file)
+        self.paths = Paths(folder_path, image_name, unet_model_file, classifier_file, track_config_file)
         self.paths.make_folders()
         self.segmented_coordinates = []
         self.unet = None
@@ -244,6 +246,7 @@ class Tracker:
                                                                      self.classifier_size, label)
                     sub_label_img = np.expand_dims(sub_label_img, axis=(0, 4))
                     label_phenotype = self.classifier.predict(sub_label_img)
+                    label_phenotype = 1 if label_phenotype > 0.5 else 0
                     self.t.append(vol)
                     self.x_seg.append(cell_coordinates[0])
                     self.y_seg.append(cell_coordinates[1])
@@ -301,7 +304,7 @@ class Tracker:
         """
         objects = btrack.dataio.objects_from_dict(self.cell_coordinates)
         with btrack.BayesianTracker() as btracker:
-            btracker.configure_from_file(os.path.join(self.paths.models,'cell_track_config.json'))
+            btracker.configure_from_file(os.path.join(self.paths.models, self.paths.track_config_file))
             btracker.max_search_radius = self.search_radius
             btracker.tracking_updates = ['MOTION']
             btracker.append(objects)
@@ -366,4 +369,3 @@ class Tracker:
         self._transform_layer_to_real()
         print("Finished coordinates transform")
         self.link_cells()
-

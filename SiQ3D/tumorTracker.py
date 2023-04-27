@@ -9,11 +9,11 @@ from matplotlib import animation
 import matplotlib.image as mgimg
 import numpy as np
 from functools import reduce
-from SiQ3D.preprocess import _make_folder, read_image_sequence, mean_background, correct_bleaching, _normalize_image, \
+from .preprocess import _make_folder, read_image_sequence, mean_background, correct_bleaching, _normalize_image, \
     crop_subregion, save_img3ts, load_image, _normalize_label
-from SiQ3D.unet3d import unet3_prediction, _divide_img, _augmentation_generator
-from SiQ3D.segmentation import watershed_tascan, watershed_2d_markers
-from SiQ3D.track import pr_gls_quick, initial_matching_quick, gaussian_filter, get_subregions, \
+from .unet3d import unet3_prediction, _divide_img, _augmentation_generator
+from .segmentation import watershed_tascan, watershed_2d_markers
+from .track import pr_gls_quick, initial_matching_quick, gaussian_filter, get_subregions, \
     tracking_plot_xy, tracking_plot_zx
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.image import ImageDataGenerator

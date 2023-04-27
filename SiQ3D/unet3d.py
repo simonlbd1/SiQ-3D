@@ -15,7 +15,7 @@ from tensorflow.keras.layers import Conv3D, LeakyReLU, Input, MaxPooling3D, UpSa
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
-from SiQ3D.preprocess import load_image, _make_folder, _normalize_image, _normalize_label, mean_background, \
+from .preprocess import load_image, _make_folder, _normalize_image, _normalize_label, mean_background, \
     correct_bleaching
 
 warnings.filterwarnings('ignore')
@@ -554,4 +554,3 @@ class TrainingUNet3D:
         plt.legend()
         plt.tight_layout()
         plt.pause(0.1)
-
