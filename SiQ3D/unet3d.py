@@ -14,7 +14,7 @@ from tensorflow.keras.layers import Conv3D, LeakyReLU, Input, MaxPooling3D, UpSa
     BatchNormalization
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-
+from sklearn.metrics import confusion_matrix, accuracy_score
 from .preprocess import load_image, _make_folder, _normalize_image, _normalize_label, mean_background, \
     correct_bleaching
 
@@ -339,6 +339,7 @@ class TrainingUNet3D:
         self.valid_data = None
         self.train_losses = None
         self.val_losses = None
+        self.best_epoch = None
         self.models_path = ""
         self._make_folders()
         self.model.compile(loss='binary_crossentropy', optimizer="adam")
@@ -492,6 +493,7 @@ class TrainingUNet3D:
             if step == 1:
                 self.val_losses = [self.model.history.history["val_loss"][-1]]
                 self.train_losses = [self.model.history.history["loss"][-1]]
+                self.best_epoch = step
                 print("val_loss at step 1: ", min(self.val_losses))
                 self.model.save_weights(os.path.join(self.models_path, weights_name + f"step{step}.h5"))
                 self._draw_prediction(step)
@@ -499,10 +501,14 @@ class TrainingUNet3D:
                 loss = self.model.history.history["val_loss"][-1]
                 self.train_losses.append(self.model.history.history["loss"][-1])
                 if loss < min(self.val_losses):
+                    self.best_epoch = step
                     print("val_loss updated from ", min(self.val_losses), " to ", loss)
                     self.model.save_weights(os.path.join(self.models_path, weights_name + f"step{step}.h5"))
                     self._draw_prediction(step)
                 self.val_losses.append(loss)
+
+                if step - self.best_epoch >= 20:
+                    break
 
     def select_weights(self, epoch, weights_name="weights_training_"):
         """
@@ -527,6 +533,39 @@ class TrainingUNet3D:
         np.savetxt(os.path.join(self.models_path, "losses.csv"), losses, delimiter=',',
                    header="train_loss, val_loss", comments="")
         print("Train and validation losses were stored in ./models/losses.csv")
+
+    def _predict(self, weights_name="weights_training_"):
+        """
+        Using the best model to predict the validate images
+        """
+        self.model.load_weights(os.path.join(self.models_path,
+                                             weights_name + f"step{self.best_epoch}.h5"))
+        valid_image = np.expand_dims(self.valid_image_norm, axis=[0, 4])
+        predict_image = unet3_prediction(valid_image, self.model)[0, :, :, :, 0]
+        predict_image = predict_image > 0.5
+        predict_image = predict_image.astype(np.uint)
+        return predict_image
+
+    def report_iou_dice(self):
+        """
+        Report the 3D U-Net performance metrics: IoU and Dice
+        """
+        y_true = self.valid_label_norm.flatten()
+        y_pred = self._predict()
+        y_pred = y_pred.flatten()
+        confusion_mat = confusion_matrix(y_true, y_pred)
+        intersection = np.diag(confusion_mat)
+        ground_truth_set = confusion_mat.sum(axis=1)
+        predicted_set = confusion_mat.sum(axis=0)
+        union = ground_truth_set + predicted_set - intersection
+        iou_matrix = intersection / union.astype(np.float32)
+        iou = np.mean(iou_matrix)
+        sum_set = ground_truth_set + predicted_set
+        dice_matrix = 2 * intersection / sum_set.astype(np.float32)
+        dice = np.mean(dice_matrix)
+        pixel_accuracy = accuracy_score(y_true, y_pred)
+        print("The reported metrics of 3D U-Net performance:")
+        print("Pixel accuracy = ", format(pixel_accuracy, '.4f'), ", IoU=", format(iou, '.4f'), ", Dice=", format(dice, '.4f'))
 
     def _draw_prediction(self, step, percentile_top=99.9, percentile_bottom=10):
         """Draw the predictions in current step"""

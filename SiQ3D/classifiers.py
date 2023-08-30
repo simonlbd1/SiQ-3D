@@ -4,6 +4,7 @@ Author: Simon lbd
 """
 
 import os
+import cv2
 import random
 import numpy as np
 import tensorflow as tf
@@ -13,7 +14,11 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.layers import Conv3D, MaxPool3D, BatchNormalization, Dropout, Flatten, Dense, \
     concatenate, LeakyReLU
 from tensorflow.keras import Input, Model, optimizers, regularizers
+from keras import backend
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, f1_score, \
+    roc_curve, RocCurveDisplay, auc
 from .preprocess import _make_folder, _get_files
+
 TITLE_STYLE = {'fontsize': 16, 'verticalalignment': 'bottom'}
 
 
@@ -38,25 +43,95 @@ def load_image(image_folder):
     return image
 
 
-def rotate(volume):
+def add_shot_noise(volume):
     """
-    Rotate the volume by random degrees.
+    Add shot noise to the input image
+
+    Parameters
+    ----------
+        volume: numpy.ndarray, input image
+
+    Returns
+    ----------
+        noisy_volume: numpy.ndarray, image after adding shot noise
+    """
+    # Generate shot noise with the same shape as the input image
+    noise = np.random.poisson(volume)
+
+    # Add shot noise to the input image
+    noisy_volume = volume + noise
+    noisy_volume = np.clip(noisy_volume, 0, 255)
+    noisy_volume = noisy_volume.astype(np.uint8)
+    return noisy_volume
+
+
+def add_blur_noise(volume):
+    """
+    Add blur noise to the input image.
+
+    Parameters
+    ----------
+        volume: numpy.ndarray, input image
+
+    Returns
+    ----------
+        noisy_volume: numpy.ndarray, image after adding blur noise
+    """
+    kernel_size = (3, 3)
+    noisy_volume = cv2.blur(volume, kernel_size)
+    return noisy_volume
+
+
+def rotate_image(volume):
+    """
+    Rotate the input image by random degrees.
 
     Parameters
     ----------
         volume: numpy.ndarray, the training data
+
+    Returns
+    ----------
+        rot_volume: numpy.ndarray, the rotated data
     """
+    angles = [-90, -20, -10, -5, 0, 5, 10, 20, 90]
+    angle = random.choice(angles)
+    # angle = random.randrange(-30, 30)
+    volume = ndimage.rotate(volume, angle, reshape=False)
+    rot_volume = np.clip(volume, 0, 255)
+    return rot_volume
 
-    def scipy_rotate(volume):
-        angles = [-20, -10, -5, 5, 10, 20]
-        angle = random.choice(angles)
-        volume = ndimage.rotate(volume, angle, reshape=False)
-        volume[volume < 0] = 0
-        volume[volume > 255] = 255
-        return volume
 
-    augmented_volume = tf.numpy_function(scipy_rotate, [volume], tf.uint8)
-    return augmented_volume
+def augment_i_image(volume):
+    """
+    Augment image by randomly rotating the image and then add shot/blur noise
+
+    Parameters
+    ----------
+        volume: numpy.ndarray
+
+
+    Returns
+    ----------
+        augmented_volume: numpy.ndarray
+    """
+    noise = [0, 1, 2]
+    volume = rotate_image(volume)
+
+    random_noise = random.choice(noise)
+    if random_noise == 0:
+        pass
+    elif random_noise == 1:
+        volume = add_shot_noise(volume)
+    else:
+        volume = add_blur_noise(volume)
+
+    return volume
+
+
+def augment_image(volume):
+    augmented_img = tf.numpy_function(augment_i_image, [volume], tf.uint8)
+    return augmented_img
 
 
 def train_preprocessing(volume, label):
@@ -73,7 +148,7 @@ def train_preprocessing(volume, label):
         volume: numpy.ndarray, the augmented images
         label: numpy.ndarray, the corresponding labels
     """
-    volume = rotate(volume)
+    volume = augment_image(volume)
     volume = tf.expand_dims(volume, axis=3)
     return volume, label
 
@@ -91,6 +166,7 @@ def validation_preprocess(volume, label):
     ----------
         volume, label: numpy.ndarray
     """
+    # volume = augment_image(volume)
     volume = tf.expand_dims(volume, axis=3)
     return volume, label
 
@@ -157,23 +233,27 @@ def sequential_classifier(width=64, height=64, depth=27):
             model: keras.model
         """
     inputs = Input((width, height, depth, 1))
-    conv1 = Conv3D(filters=8, kernel_size=(3, 3, 1), padding="same", activation="relu")(inputs)
+    conv1 = Conv3D(filters=8, kernel_size=(3, 3, 1), padding="same", activation="relu",
+                   kernel_regularizer=regularizers.l2(l=0.01))(inputs)
     conv1 = BatchNormalization()(conv1)
-    #conv1 = Conv3D(filters=8, kernel_size=(3, 3, 1), padding="same", activation="relu")(conv1)
-    #conv1 = BatchNormalization()(conv1)
+    # conv1 = Conv3D(filters=8, kernel_size=(3, 3, 1), padding="same", activation="relu",
+    #                kernel_regularizer=regularizers.l2(l=0.01))(conv1)
+    # conv1 = BatchNormalization()(conv1)
     pool1 = MaxPool3D(pool_size=2)(conv1)
 
-    conv2 = Conv3D(filters=16, kernel_size=(3, 3, 3), padding="same", activation="relu")(pool1)
+    conv2 = Conv3D(filters=16, kernel_size=(3, 3, 1), padding="same", activation="relu",
+                   kernel_regularizer=regularizers.l2(l=0.01))(pool1)
     conv2 = BatchNormalization()(conv2)
-    #conv2 = Conv3D(filters=16, kernel_size=3, padding="same", activation="relu")(conv2)
-    #conv2 = BatchNormalization()(conv2)
+    # conv2 = Conv3D(filters=16, kernel_size=(3, 3, 1), padding="same", activation="relu",
+    #                kernel_regularizer=regularizers.l2(l=0.01))(conv2)
+    # conv2 = BatchNormalization()(conv2)
     pool2 = MaxPool3D()(conv2)
 
-    drop1 = Dropout(0.2)(pool2)
+    drop1 = Dropout(0.3)(pool2)
     dens1 = Flatten()(drop1)
 
-    dens2 = Dense(units=96, activation="relu")(dens1)
-    outputs = Dense(units=1, activation="sigmoid")(dens2)
+    dens2 = Dense(units=96, activation="relu", kernel_regularizer=regularizers.l2(l=0.01))(dens1)
+    outputs = Dense(units=1, activation="sigmoid", kernel_regularizer=regularizers.l2(l=0.01))(dens2)
 
     model = Model(inputs=inputs, outputs=outputs)
     return model
@@ -189,6 +269,7 @@ class Classifier:
     def __init__(self, model, folder_path, learning_rate=0.001):
         self.model = model
         self.folder_path = folder_path
+        self.learning_rate = learning_rate
         self.data_set0 = None
         self.data_set1 = None
         self.label0 = None
@@ -201,14 +282,16 @@ class Classifier:
         self.image_path1 = None
         self.train_loader = None
         self.validation_loader = None
-        self.val_acc = None
-        self.acc = None
-        self.loss = None
-        self.val_loss = None
+        self.metrics = {}
+        # self.val_acc = None
+        # self.acc = None
+        # self.loss = None
+        # self.val_loss = None
         self.best_epoch = None
         self.models_path = ""
         self._make_folders()
-        self.model.compile(loss='binary_crossentropy', optimizer=optimizers.Adam(learning_rate=learning_rate), metrics=["acc"])
+        self.model.compile(loss='binary_crossentropy', optimizer=optimizers.Adam(learning_rate=learning_rate),
+                           metrics=['acc', tf.keras.metrics.Recall(), tf.keras.metrics.Precision()])
         self.model.save_weights(os.path.join(self.models_path, 'weights_initial.h5'))
 
     def _make_folders(self):
@@ -283,27 +366,41 @@ class Classifier:
         """
         self.model.load_weights(os.path.join(self.models_path, 'weights_initial.h5'))
         for step in range(1, iteration + 1):
+            if step % 10 == 0:
+                backend.set_value(self.model.optimizer.learning_rate, self.learning_rate/1.2)
             self.model.fit(self.train_loader, validation_data=self.validation_loader,
                            epochs=1, verbose=2)
             if step == 1:
-                self.val_acc = [self.model.history.history["val_acc"][-1]]
-                self.acc = [self.model.history.history["acc"][-1]]
-                self.val_loss = [self.model.history.history["val_loss"][-1]]
-                self.loss = [self.model.history.history["loss"][-1]]
-                print("val_acc at step 1: ", max(self.val_acc))
+                self.metrics['val_acc'] = [self.model.history.history["val_acc"][-1]]
+                self.metrics['acc'] = [self.model.history.history["acc"][-1]]
+                self.metrics['val_loss'] = [self.model.history.history["val_loss"][-1]]
+                self.metrics['loss'] = [self.model.history.history["loss"][-1]]
+                self.metrics['precision'] = [self.model.history.history["precision"][-1]]
+                self.metrics['val_precision'] = [self.model.history.history["val_precision"][-1]]
+                self.metrics['recall'] = [self.model.history.history["recall"][-1]]
+                self.metrics['val_recall'] = [self.model.history.history["val_recall"][-1]]
+                # self.val_acc = [self.model.history.history["val_acc"][-1]]
+                # self.acc = [self.model.history.history["acc"][-1]]
+                # self.val_loss = [self.model.history.history["val_loss"][-1]]
+                # self.loss = [self.model.history.history["loss"][-1]]
+                print("val_acc at step 1: ", self.metrics['val_acc'][0])
                 self.model.save_weights(os.path.join(self.models_path, weights_name + f"step{step}.h5"))
                 self.best_epoch = step
             else:
                 val_acc = self.model.history.history["val_acc"][-1]
-                if val_acc > max(self.val_acc):
-                    print("At step: ", step, ",val_acc updated from ", max(self.val_acc), " to ", val_acc)
+                if val_acc > max(self.metrics['val_acc']):
+                    print("At step: ", step, ",val_acc updated from ", max(self.metrics['val_acc']), " to ", val_acc)
                     self.model.save_weights(os.path.join(self.models_path, weights_name + f"step{step}.h5"))
                     self.best_epoch = step
 
-                self.val_acc.append(self.model.history.history["val_acc"][-1])
-                self.acc.append(self.model.history.history["acc"][-1])
-                self.loss.append(self.model.history.history["loss"][-1])
-                self.val_loss.append(self.model.history.history["val_loss"][-1])
+                self.metrics['val_acc'].append(self.model.history.history["val_acc"][-1])
+                self.metrics['acc'].append(self.model.history.history["acc"][-1])
+                self.metrics['loss'].append(self.model.history.history["loss"][-1])
+                self.metrics['val_loss'].append(self.model.history.history["val_loss"][-1])
+                self.metrics['precision'].append(self.model.history.history["precision"][-1])
+                self.metrics['val_precision'].append(self.model.history.history["val_precision"][-1])
+                self.metrics['recall'].append(self.model.history.history["recall"][-1])
+                self.metrics['val_recall'].append(self.model.history.history["val_recall"][-1])
 
     def select_weights(self, epoch, weights_name="weights_training_"):
         """
@@ -317,19 +414,51 @@ class Classifier:
         self.model.load_weights(os.path.join(self.models_path, weights_name + f"step{epoch}.h5"))
         self.model.save(os.path.join(self.models_path, "classifier_pretrained.h5"))
 
+    def classification_predict(self, weights_name="weights_training_"):
+        """
+        Predict the cellular phenotypes
+
+        Parameters
+        ----------
+            weights_name: str, the prefix of the weights file to be restored.
+
+        Return
+        ----------
+            y_pred: numpy.array, the prediction results
+        """
+        self.model.load_weights(os.path.join(self.models_path,
+                                             weights_name + f"step{self.best_epoch}.h5"))
+        predictions = self.model.predict(self.validate_image)
+        y_pred = [0 if predictions[i][0] < 0.5 else 1 for i in range(len(predictions))]
+        return np.array(y_pred)
+
+    def classifier_performance_evaluation(self):
+        """
+        Report the accuracy, precision, recall and f1-score of the classifier
+        """
+        y_pred = self.classification_predict()
+        acc = accuracy_score(self.validate_label, y_pred)
+        precision = precision_score(self.validate_label, y_pred)
+        recall = recall_score(self.validate_label, y_pred)
+        f1score = f1_score(self.validate_label, y_pred)
+        print("The reported metrics of classifier evaluation: ")
+        print("Accuracy=", format(acc, '.4f'), ", precision=", format(precision, '.4f'),
+              ", recall=", format(recall, '.4f'), ", f1_score=", format(f1score, '.4f'))
+
     def draw_loss_accuracy(self):
         """
         Draw the loss/val_loss and acc/val_acc
         """
         fig, ax = plt.subplots(1, 2, figsize=(16, 10))
-        ax[0].plot(self.loss, 'b', linewidth=2, label='loss')
-        ax[0].plot(self.val_loss, 'r', linewidth=2, label='val_loss')
-        ax[0].set_title("Loss/val_loss", fontdict=TITLE_STYLE)
+        ax[0].plot(self.metrics['loss'], 'b', linewidth=2, label='loss')
+        ax[0].plot(self.metrics['val_loss'], 'r', linewidth=2, label='val_loss')
+        ax[0].set_title("Loss and validation loss", fontdict=TITLE_STYLE)
         ax[0].set_xlabel("Epoch")
         ax[0].set_ylabel("Loss")
         ax[0].legend()
-        ax[1].plot(self.acc, 'b', linewidth=2, label='accuracy')
-        ax[1].plot(self.val_acc, 'r', linewidth=2, label="val_accuracy")
+        ax[1].plot(self.metrics['acc'], 'b', linewidth=2, label='accuracy')
+        ax[1].plot(self.metrics['val_acc'], 'r', linewidth=2, label="val_accuracy")
+        ax[1].set_title("Accuracy and validation accuracy", fontdict=TITLE_STYLE)
         ax[1].set_xlabel("Epoch")
         ax[1].set_ylabel("Accuracy")
         ax[1].legend()
@@ -339,7 +468,21 @@ class Classifier:
         """
         Save the loss and accuracy during the training procedure
         """
-        loss_acc = np.column_stack((np.array(self.loss), np.array(self.val_loss), np.array(self.acc),
-                                    np.array(self.val_acc)))
+        loss_acc = np.column_stack((np.array(self.metrics['loss']),
+                                    np.array(self.metrics['val_loss']),
+                                    np.array(self.metrics['acc']),
+                                    np.array(self.metrics['val_acc'])))
         np.savetxt(os.path.join(self.models_path, "losses_and_accuracies.csv"), loss_acc,
                    delimiter=',', header="loss,val_loss,acc,val_acc", comments="")
+
+    def plot_roc_curve(self):
+        """
+        Plot the roc curve
+        """
+        y_pred = self.classification_predict()
+        fpr, tpr, thresholds = roc_curve(self.validate_label, y_pred)
+        roc_auc = auc(fpr, tpr)
+        display = RocCurveDisplay(fpr=fpr, tpr=tpr, roc_auc=roc_auc)
+        display.plot()
+        plt.plot([0, 1], [0, 1], linestyle='dashed')
+        plt.tight_layout()
